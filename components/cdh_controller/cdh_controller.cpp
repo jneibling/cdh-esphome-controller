@@ -1,4 +1,4 @@
-#include "cdh_controller.h"
+#include "esphome/components/cdh_controller/cdh_controller.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
