@@ -1,0 +1,158 @@
+esphome:
+  name: greenhouse-diesel-heater
+  friendly_name: Greenhouse Diesel Heater
+
+esp32:
+  board: esp32-c3-devkitm-1
+
+
+logger:
+  baud_rate: 0  # Disable logging on UART0
+
+api:
+  encryption:
+    key: "rYTwDdj16qf6ayGkmcDVGBPW5DKnb7Y4hz8LgcQLSxQ="
+
+framework:
+  type: esp-idf
+
+ota:
+  platform: esphome
+  password: "altaiagffa"
+
+wifi:
+  ssid: "Neibling"
+  password: "jaggedship210"
+  ap:
+    ssid: "Diesel-Heater-Fallback"
+    password: "fallback123"
+
+captive_portal:
+
+# =============================================================
+# COMPONENT SOURCE
+# =============================================================
+# Option A: Local component (copy cdh_controller/ folder into
+#           your ESPHome config directory under custom_components/)
+external_components:
+  - source:
+      type: local
+      path: custom_components
+    components: [cdh_controller]
+
+# Option B: GitHub hosted (once you push the component to a repo)
+# external_components:
+#   - source: github://your-username/cdh-esphome-controller@main
+#     components: [cdh_controller]
+
+# =============================================================
+# UART CONFIGURATION
+# =============================================================
+# IMPORTANT: Both TX and RX pins required for control mode.
+# RX = GPIO16 (your existing blue wire connection)
+# TX = GPIO17 (new - connects to blue wire via relay + level shifter)
+uart:
+  baud_rate: 25000
+  rx_pin: GPIO20
+  tx_pin: GPIO21
+  id: uart_bus
+  rx_buffer_size: 512
+
+# =============================================================
+# CDH CONTROLLER - MAIN COMPONENT
+# =============================================================
+cdh_controller:
+  id: heater
+  update_interval: 5s   # Polling rate in passive mode
+                        # (active mode uses 1s internally)
+  relay_pin: GPIO4      # Controls SPDT relay for OEM/ESP32 switching
+                        # LOW = OEM controller (failsafe default)
+                        # HIGH = ESP32 control
+
+# =============================================================
+# SENSORS (read from heater - same as before)
+# =============================================================
+sensor:
+  - platform: cdh_controller
+    current_temperature:
+      name: "Current Temperature"
+    fan_speed:
+      name: "Fan Speed"
+    supply_voltage:
+      name: "Supply Voltage"
+    heat_exchanger_temp:
+      name: "Heat Exchanger Temp"
+    glow_plug_voltage:
+      name: "Glow Plug Voltage"
+    glow_plug_current:
+      name: "Glow Plug Current"
+    pump_frequency:
+      name: "Pump Frequency"
+    fan_voltage:
+      name: "Fan Voltage"
+    desired_temperature:
+      name: "Desired Temperature"
+
+# =============================================================
+# TEXT SENSORS
+# =============================================================
+text_sensor:
+  - platform: cdh_controller
+    run_state:
+      name: "Run State"
+    error_code:
+      name: "Error Code"
+
+# =============================================================
+# BINARY SENSORS
+# =============================================================
+binary_sensor:
+  - platform: cdh_controller
+    on_off_state:
+      name: "Heater On/Off"
+    control_active:
+      name: "ESP32 Control Active"
+
+# =============================================================
+# SWITCHES (control)
+# =============================================================
+switch:
+  - platform: cdh_controller
+    heater_switch:
+      name: "Heater Power"
+    control_mode_switch:
+      name: "ESP32 Control Mode"
+
+# =============================================================
+# NUMBER ENTITIES (control parameters)
+# =============================================================
+number:
+  - platform: cdh_controller
+    desired_temperature:
+      name: "Set Temperature"
+    min_pump_frequency:
+      name: "Min Pump Hz"
+    max_pump_frequency:
+      name: "Max Pump Hz"
+    min_fan_rpm:
+      name: "Min Fan RPM"
+    max_fan_rpm:
+      name: "Max Fan RPM"
+    altitude:
+      name: "Altitude"
+    supply_voltage_setting:
+      name: "Supply Voltage Setting"
+    glow_plug_power:
+      name: "Glow Plug Power"
+    min_temp_limit:
+      name: "Min Temp Limit"
+    max_temp_limit:
+      name: "Max Temp Limit"
+
+# =============================================================
+# SELECT ENTITIES
+# =============================================================
+select:
+  - platform: cdh_controller
+    operating_mode:
+      name: "Operating Mode"
