@@ -4,6 +4,8 @@ esphome:
 
 esp32:
   board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
 
 
 logger:
@@ -13,8 +15,7 @@ api:
   encryption:
     key: "rYTwDdj16qf6ayGkmcDVGBPW5DKnb7Y4hz8LgcQLSxQ="
 
-framework:
-  type: esp-idf
+
 
 ota:
   platform: esphome
@@ -34,16 +35,16 @@ captive_portal:
 # =============================================================
 # Option A: Local component (copy cdh_controller/ folder into
 #           your ESPHome config directory under custom_components/)
-external_components:
-  - source:
-      type: local
-      path: custom_components
-    components: [cdh_controller]
+#external_components:
+#  - source:
+#      type: local
+#      path: custom_components
+#    components: [cdh_controller]
 
 # Option B: GitHub hosted (once you push the component to a repo)
-# external_components:
-#   - source: github://your-username/cdh-esphome-controller@main
-#     components: [cdh_controller]
+external_components:
+  - source: github://jneibling/cdh-esphome-controller@main
+    components: [cdh_controller]
 
 # =============================================================
 # UART CONFIGURATION
