@@ -1,4 +1,4 @@
-#include "esphome/components/cdh_controller/cdh_controller.h"
+#include "cdh_controller.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
@@ -64,7 +64,7 @@ uint16_t CDHController::calc_crc16_(const uint8_t *data, uint8_t len) {
 }
 
 // ============================================================
-// Frame validation
+// Frame validation (CRC is big-endian in this protocol)
 // ============================================================
 bool CDHController::validate_frame_(const uint8_t *frame) {
   if (frame[0] != FRAME_START) return false;
@@ -81,6 +81,15 @@ int CDHController::find_frame_start_(const uint8_t *buf, int len) {
     }
   }
   return -1;
+}
+
+// ============================================================
+// Identify if a frame is TX (controller→heater) or RX (heater→controller)
+// TX frames have operating mode byte at [13] = 0xCD or 0xA5
+// RX frames will have small values at [13] (pump freq data)
+// ============================================================
+bool CDHController::is_tx_frame_(const uint8_t *frame) {
+  return (frame[13] == MODE_THERMOSTAT || frame[13] == MODE_FIXED_HZ);
 }
 
 // ============================================================
@@ -130,7 +139,7 @@ void CDHController::loop() {
         this->last_valid_rx_time_ = millis();
       } else {
         ESP_LOGW(TAG, "No valid response from heater");
-        // If no response for too long, maybe switch back to OEM
+        // If no response for too long, switch back to OEM
         if (millis() - this->last_valid_rx_time_ > COMMS_TIMEOUT_MS &&
             this->last_valid_rx_time_ != 0) {
           ESP_LOGE(TAG, "Comms timeout - reverting to OEM controller!");
@@ -148,13 +157,32 @@ void CDHController::loop() {
 void CDHController::update() {
   if (!this->esp_control_active_) {
     // === PASSIVE MONITORING MODE ===
-    // Read whatever is in the UART buffer (OEM controller <-> heater traffic)
     parse_passive_frames_();
   }
 }
 
 // ============================================================
 // Build the 24-byte TX command frame
+// Byte layout matches OEM controller (verified from captured frames):
+//   [0]  0x76 start
+//   [1]  0x16 length (22)
+//   [2]  On/Off command
+//   [3]  0x00 (reserved/padding)
+//   [4]  Desired temperature
+//   [5]  Min pump frequency (*10)
+//   [6]  Max pump frequency (*10)
+//   [7-8]  Min fan RPM (big-endian)
+//   [9-10] Max fan RPM (big-endian)
+//   [11] Supply voltage (*10)
+//   [12] Fan sensor pulses
+//   [13] Operating mode (0xCD=thermostat, 0xA5=fixed Hz)
+//   [14] Min temp limit
+//   [15] Max temp limit
+//   [16] Glow plug power
+//   [17] Pump mode (0=auto)
+//   [18-19] Reserved/unknown
+//   [20-21] Altitude (big-endian)
+//   [22-23] CRC-16 (big-endian)
 // ============================================================
 void CDHController::build_tx_frame_() {
   memset(this->tx_frame_, 0, FRAME_SIZE);
@@ -162,29 +190,30 @@ void CDHController::build_tx_frame_() {
   this->tx_frame_[0] = FRAME_START;              // Start byte
   this->tx_frame_[1] = FRAME_LENGTH;             // Payload length (22)
   this->tx_frame_[2] = this->heater_on_cmd_ ? 0x01 : 0x00;  // On/Off
-  this->tx_frame_[3] = this->ambient_temp_;       // Current ambient temp
-  this->tx_frame_[4] = this->desired_temp_;       // Desired temperature
-  this->tx_frame_[5] = this->min_pump_freq_raw_;  // Min pump Hz * 10
-  this->tx_frame_[6] = this->max_pump_freq_raw_;  // Max pump Hz * 10
+  this->tx_frame_[3] = 0x00;                      // Reserved (OEM sends 0x00)
+  this->tx_frame_[4] = this->desired_temp_;        // Desired temperature
+  this->tx_frame_[5] = this->min_pump_freq_raw_;   // Min pump Hz * 10
+  this->tx_frame_[6] = this->max_pump_freq_raw_;   // Max pump Hz * 10
   this->tx_frame_[7] = (this->min_fan_rpm_ >> 8) & 0xFF;  // Min fan RPM high
   this->tx_frame_[8] = this->min_fan_rpm_ & 0xFF;         // Min fan RPM low
   this->tx_frame_[9] = (this->max_fan_rpm_ >> 8) & 0xFF;  // Max fan RPM high
   this->tx_frame_[10] = this->max_fan_rpm_ & 0xFF;        // Max fan RPM low
   this->tx_frame_[11] = this->supply_voltage_raw_;  // Voltage * 10
   this->tx_frame_[12] = this->fan_sensor_pulses_;   // Fan sensor pulses
-  this->tx_frame_[13] = this->operating_mode_;       // Mode
+  this->tx_frame_[13] = this->operating_mode_;       // Mode (0xCD/0xA5)
   this->tx_frame_[14] = this->min_temp_limit_;       // Min temp limit
   this->tx_frame_[15] = this->max_temp_limit_;       // Max temp limit
   this->tx_frame_[16] = this->glow_plug_power_;      // Glow plug power
-  this->tx_frame_[17] = this->pump_mode_;             // Pump mode
-  this->tx_frame_[18] = (this->altitude_ >> 8) & 0xFF;  // Altitude high
-  this->tx_frame_[19] = this->altitude_ & 0xFF;         // Altitude low
-  // Bytes 20-21 reserved (0x00)
+  this->tx_frame_[17] = this->pump_mode_;             // Pump mode (0=auto)
+  this->tx_frame_[18] = 0x00;                         // Reserved
+  this->tx_frame_[19] = 0x00;                         // Reserved
+  this->tx_frame_[20] = (this->altitude_ >> 8) & 0xFF;  // Altitude high
+  this->tx_frame_[21] = this->altitude_ & 0xFF;         // Altitude low
 
-  // Calculate and append CRC-16
+  // Calculate and append CRC-16 (big-endian)
   uint16_t crc = calc_crc16_(this->tx_frame_, FRAME_SIZE - 2);
-  this->tx_frame_[22] = crc & 0xFF;         // CRC low
-  this->tx_frame_[23] = (crc >> 8) & 0xFF;  // CRC high
+  this->tx_frame_[22] = (crc >> 8) & 0xFF;  // CRC high
+  this->tx_frame_[23] = crc & 0xFF;         // CRC low
 }
 
 // ============================================================
@@ -249,10 +278,10 @@ bool CDHController::read_response_frame_(uint8_t *frame, uint32_t timeout_ms) {
 }
 
 // ============================================================
-// Parse passive mode frames (48 bytes = TX + RX)
-// The daoudeddy component reads both the OEM controller's
-// TX frame and the heater's RX response as one 48-byte block.
-// We want the HEATER's response (second 24 bytes).
+// Parse passive mode frames
+// Reads the continuous stream of OEM controller ↔ heater traffic.
+// Identifies TX vs RX frames by content (byte[13] = 0xCD/0xA5
+// is unique to TX frames as the operating mode field).
 // ============================================================
 void CDHController::parse_passive_frames_() {
   int avail = this->available();
@@ -265,26 +294,40 @@ void CDHController::parse_passive_frames_() {
     this->read_byte(&buf[count++]);
   }
 
-ESP_LOGV(TAG, "Passive: read %d bytes", count);
+  ESP_LOGV(TAG, "Passive: read %d bytes", count);
 
-  // Debug: dump first 48 bytes (or less) to see raw frame data
+  // Debug: dump first 48 bytes
   int dump_len = count < 48 ? count : 48;
   ESP_LOGV(TAG, "Raw: %s", format_hex_pretty(buf, dump_len).c_str());
 
-  // Scan for frame pairs (TX frame + RX frame)
-  // We look for two consecutive valid frames
+  // Strategy: Find any two consecutive valid frames, then identify
+  // which is TX and which is RX by content (not position).
   for (int i = 0; i < count - FULL_FRAME_SIZE + 1; i++) {
     if (buf[i] == FRAME_START && buf[i + 1] == FRAME_LENGTH) {
-      // Potential TX frame start
       if (i + FULL_FRAME_SIZE <= count) {
-        uint8_t *tx_frame = &buf[i];
-        uint8_t *rx_frame = &buf[i + FRAME_SIZE];
+        uint8_t *frame_a = &buf[i];
+        uint8_t *frame_b = &buf[i + FRAME_SIZE];
 
         // Validate both frames
-        if (validate_frame_(tx_frame) && validate_frame_(rx_frame)) {
-          // Parse the TX frame to capture OEM controller settings
-          // (useful for learning default values)
-          this->ambient_temp_ = tx_frame[3];
+        if (validate_frame_(frame_a) && validate_frame_(frame_b)) {
+          uint8_t *tx_frame = nullptr;
+          uint8_t *rx_frame = nullptr;
+
+          // Identify which is TX and which is RX
+          if (is_tx_frame_(frame_a) && !is_tx_frame_(frame_b)) {
+            tx_frame = frame_a;
+            rx_frame = frame_b;
+          } else if (!is_tx_frame_(frame_a) && is_tx_frame_(frame_b)) {
+            tx_frame = frame_b;
+            rx_frame = frame_a;
+          } else {
+            // Both look like same type - skip this pair
+            ESP_LOGW(TAG, "Could not distinguish TX/RX pair");
+            continue;
+          }
+
+          // Parse TX frame for OEM controller settings
+          parse_tx_frame_(tx_frame);
 
           // Parse the heater's response
           parse_rx_frame_(rx_frame);
@@ -300,17 +343,23 @@ ESP_LOGV(TAG, "Passive: read %d bytes", count);
     }
   }
 
-  // If we didn't find a frame pair, try to find just a single
-  // heater response frame (might happen if timing catches partial)
+  // Fallback: find a single valid frame
   for (int i = 0; i < count - FRAME_SIZE + 1; i++) {
     if (buf[i] == FRAME_START && buf[i + 1] == FRAME_LENGTH) {
       uint8_t *frame = &buf[i];
       if (validate_frame_(frame)) {
-        // Could be either TX or RX - parse it as RX anyway
-        // The sensor values will only make sense for the RX frame
-        // but this is a best-effort fallback
-        parse_rx_frame_(frame);
-        this->last_valid_rx_time_ = millis();
+        if (is_tx_frame_(frame)) {
+          // It's a TX frame - extract OEM settings
+          parse_tx_frame_(frame);
+          ESP_LOGV(TAG, "Passive single TX: %s",
+            format_hex_pretty(frame, FRAME_SIZE).c_str());
+        } else {
+          // It's an RX frame - parse heater data
+          parse_rx_frame_(frame);
+          this->last_valid_rx_time_ = millis();
+          ESP_LOGV(TAG, "Passive single RX: %s",
+            format_hex_pretty(frame, FRAME_SIZE).c_str());
+        }
         return;
       }
     }
@@ -318,7 +367,48 @@ ESP_LOGV(TAG, "Passive: read %d bytes", count);
 }
 
 // ============================================================
+// Parse OEM controller TX frame (for learning settings)
+// TX byte layout (verified from captured OEM frames):
+//   [3]  = 0x00 reserved
+//   [4]  = Desired temperature
+//   [5]  = Min pump freq (*10)
+//   [6]  = Max pump freq (*10)
+//   [7-8]  = Min fan RPM
+//   [9-10] = Max fan RPM
+//   [11] = Supply voltage (*10)
+//   [13] = Operating mode
+// ============================================================
+void CDHController::parse_tx_frame_(const uint8_t *frame) {
+  // Capture ambient/desired temp from OEM controller
+  this->ambient_temp_ = frame[4];  // OEM sends current reading here
+
+  // Publish desired temperature from OEM controller
+  if (this->desired_temp_sensor_ != nullptr && !this->esp_control_active_) {
+    this->desired_temp_sensor_->publish_state(frame[4]);
+  }
+}
+
+// ============================================================
 // Parse the heater's 24-byte response frame
+// RX byte layout (verified from captured heater responses):
+//   [0]  0x76 start
+//   [1]  0x16 length
+//   [2]  Run state (0=Off, 1=Starting, ..., 5=Running, ...)
+//   [3]  On/off acknowledgement
+//   [4]  Error code (0=None, 1=E-01, ...)
+//   [5]  Supply voltage raw (/10 for volts)
+//   [6-7]  Fan speed RPM (big-endian)
+//   [8-9]  Fan voltage (big-endian, /10)
+//   [10] Unknown
+//   [11] Heat exchanger temperature (°C)
+//   [12-13] Glow plug voltage (big-endian, /10)
+//   [14] Glow plug current (/100 for amps)
+//   [15] Unknown
+//   [16] Pump frequency (/10 for Hz)
+//   [17-18] Unknown
+//   [19] Body/ambient temperature (°C)
+//   [20-21] Unknown
+//   [22-23] CRC-16 (big-endian)
 // ============================================================
 void CDHController::parse_rx_frame_(const uint8_t *frame) {
   // Byte 2: Run state
@@ -327,59 +417,53 @@ void CDHController::parse_rx_frame_(const uint8_t *frame) {
     this->run_state_sensor_->publish_state(run_state_str(run_state));
   }
 
-  // Byte 3: Error code
-  uint8_t error = frame[3];
+  // Byte 4: Error code (byte 3 is on/off ack, NOT error)
+  uint8_t error = frame[4];
   if (this->error_code_sensor_ != nullptr) {
     this->error_code_sensor_->publish_state(error_code_str(error));
   }
 
-  // Byte 4: Supply voltage (value / 10)
-  float voltage = frame[4] / 10.0f;
+  // Byte 5: Supply voltage (value / 10)
+  float voltage = frame[5] / 10.0f;
   if (this->supply_voltage_sensor_ != nullptr) {
     this->supply_voltage_sensor_->publish_state(voltage);
   }
 
-  // Bytes 5-6: Fan speed RPM (big-endian)
-  uint16_t fan_rpm = ((uint16_t)frame[5] << 8) | frame[6];
+  // Bytes 6-7: Fan speed RPM (big-endian)
+  uint16_t fan_rpm = ((uint16_t)frame[6] << 8) | frame[7];
   if (this->fan_speed_sensor_ != nullptr) {
     this->fan_speed_sensor_->publish_state(fan_rpm);
   }
 
-  // Bytes 7-8: Fan voltage (big-endian, / 10)
-  float fan_volt = (((uint16_t)frame[7] << 8) | frame[8]) / 10.0f;
+  // Bytes 8-9: Fan voltage (big-endian, / 10)
+  float fan_volt = (((uint16_t)frame[8] << 8) | frame[9]) / 10.0f;
   if (this->fan_voltage_sensor_ != nullptr) {
     this->fan_voltage_sensor_->publish_state(fan_volt);
   }
 
-  // Byte 9: Heat exchanger temperature
-  uint8_t heat_ex = frame[9];
+  // Byte 11: Heat exchanger temperature
+  uint8_t heat_ex = frame[11];
   if (this->heat_exchanger_sensor_ != nullptr) {
     this->heat_exchanger_sensor_->publish_state(heat_ex);
   }
 
-  // Bytes 10-11: Glow plug voltage (big-endian, / 10)
-  float gp_volt = (((uint16_t)frame[10] << 8) | frame[11]) / 10.0f;
+  // Bytes 12-13: Glow plug voltage (big-endian, / 10)
+  float gp_volt = (((uint16_t)frame[12] << 8) | frame[13]) / 10.0f;
   if (this->glow_plug_voltage_sensor_ != nullptr) {
     this->glow_plug_voltage_sensor_->publish_state(gp_volt);
   }
 
-  // Byte 12: Glow plug current (* 10 = mA, or direct A reading
-  // depending on firmware - publish raw and let user scale)
-  float gp_current = frame[12] / 10.0f;
+  // Byte 14: Glow plug current (/ 100 for amps)
+  float gp_current = frame[14] / 100.0f;
   if (this->glow_plug_current_sensor_ != nullptr) {
     this->glow_plug_current_sensor_->publish_state(gp_current);
   }
 
-  // Bytes 13-14: Actual pump frequency
-  // Encoding varies by firmware. Common: byte 13 = Hz * 10 (single byte)
-  // Some use byte 14 as fractional. We'll use byte 13 / 10.0
-  float pump_hz = frame[13] / 10.0f;
+  // Byte 16: Actual pump frequency (/ 10 for Hz)
+  float pump_hz = frame[16] / 10.0f;
   if (this->pump_frequency_sensor_ != nullptr) {
     this->pump_frequency_sensor_->publish_state(pump_hz);
   }
-
-  // Byte 15: Stored error code
-  // 0xFA = no stored error
 
   // On/Off state - derived from run state
   bool is_on = (run_state >= 1 && run_state <= 6);
@@ -387,27 +471,13 @@ void CDHController::parse_rx_frame_(const uint8_t *frame) {
     this->on_off_sensor_->publish_state(is_on);
   }
 
-  // Update ambient temp from heater's current temp reading if available
-  // In passive mode, we already grabbed it from the TX frame.
-  // In active mode, the heater doesn't send ambient temp in RX -
-  // we may want to get it from an external sensor instead.
-  // For now, byte 9 (heat exchanger) is the closest internal reading.
-
-  // Current temperature - this comes from the OEM controller's TX frame
-  // (byte 3). In passive mode we captured it above. In active mode,
-  // we can use an external DS18B20 or the heat exchanger as a proxy.
-  if (this->current_temp_sensor_ != nullptr && !this->esp_control_active_) {
-    this->current_temp_sensor_->publish_state(this->ambient_temp_);
+  // Current temperature (body/ambient from heater)
+  // Byte 19 appears to be body temperature reading
+  if (this->current_temp_sensor_ != nullptr) {
+    this->current_temp_sensor_->publish_state(frame[19]);
   }
 
-  // Desired temperature from TX frame (byte 4) - only in passive mode
-  if (this->desired_temp_sensor_ != nullptr && !this->esp_control_active_) {
-    // In passive mode, we'd need to parse from TX frame.
-    // For active mode, it's what we're commanding.
-    if (this->esp_control_active_) {
-      this->desired_temp_sensor_->publish_state(this->desired_temp_);
-    }
-  }
+  // Desired temperature - published from TX frame in parse_tx_frame_()
 }
 
 // ============================================================
@@ -455,13 +525,11 @@ void CDHController::set_esp_control(bool active) {
     ESP_LOGI(TAG, "Reverting to OEM controller (passive monitoring)");
 
     // SAFETY: Send a final OFF command before releasing control
-    // Only if we were running the heater
     if (this->heater_on_cmd_) {
       ESP_LOGW(TAG, "Sending shutdown command before releasing control");
       this->heater_on_cmd_ = false;
       build_tx_frame_();
       send_command_frame_();
-      // Give heater time to register the off command
       delay(100);
       send_command_frame_();
       delay(100);

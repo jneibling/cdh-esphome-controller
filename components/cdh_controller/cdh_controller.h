@@ -151,10 +151,12 @@ class CDHController : public PollingComponent, public uart::UARTDevice {
   void send_command_frame_();
   bool read_response_frame_(uint8_t *frame, uint32_t timeout_ms);
   void parse_rx_frame_(const uint8_t *frame);
+  void parse_tx_frame_(const uint8_t *frame);
   void parse_passive_frames_();
   uint16_t calc_crc16_(const uint8_t *data, uint8_t len);
   bool validate_frame_(const uint8_t *frame);
   int find_frame_start_(const uint8_t *buf, int len);
+  bool is_tx_frame_(const uint8_t *frame);
 
   // --- Hardware ---
   GPIOPin *relay_pin_{nullptr};
