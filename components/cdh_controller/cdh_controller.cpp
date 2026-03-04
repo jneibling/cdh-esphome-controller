@@ -265,7 +265,11 @@ void CDHController::parse_passive_frames_() {
     this->read_byte(&buf[count++]);
   }
 
-  ESP_LOGV(TAG, "Passive: read %d bytes", count);
+ESP_LOGV(TAG, "Passive: read %d bytes", count);
+
+  // Debug: dump first 48 bytes (or less) to see raw frame data
+  int dump_len = count < 48 ? count : 48;
+  ESP_LOGV(TAG, "Raw: %s", format_hex_pretty(buf, dump_len).c_str());
 
   // Scan for frame pairs (TX frame + RX frame)
   // We look for two consecutive valid frames
