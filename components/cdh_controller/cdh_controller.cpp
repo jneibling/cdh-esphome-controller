@@ -139,10 +139,10 @@ void CDHController::loop() {
         this->last_valid_rx_time_ = millis();
       } else {
         ESP_LOGW(TAG, "No valid response from heater");
-        // If no response for too long, switch back to OEM
-      //  if (millis() - this->last_valid_rx_time_ > COMMS_TIMEOUT_MS &&
-      //      this->last_valid_rx_time_ != 0) {
-      //    ESP_LOGE(TAG, "Comms timeout - reverting to OEM controller!");
+         If no response for too long, switch back to OEM
+         if (millis() - this->last_valid_rx_time_ > COMMS_TIMEOUT_MS &&
+            this->last_valid_rx_time_ != 0) {
+          ESP_LOGE(TAG, "Comms timeout - reverting to OEM controller!");
       //    set_esp_control(false);
         }
       }
