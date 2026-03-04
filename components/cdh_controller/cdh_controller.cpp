@@ -70,7 +70,7 @@ bool CDHController::validate_frame_(const uint8_t *frame) {
   if (frame[0] != FRAME_START) return false;
   if (frame[1] != FRAME_LENGTH) return false;
   uint16_t calc = calc_crc16_(frame, FRAME_SIZE - 2);
-  uint16_t recv = (uint16_t)frame[22] | ((uint16_t)frame[23] << 8);
+  uint16_t recv = ((uint16_t)frame[22] << 8) | (uint16_t)frame[23];
   return calc == recv;
 }
 
