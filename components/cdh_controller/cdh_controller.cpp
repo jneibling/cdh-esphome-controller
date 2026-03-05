@@ -237,6 +237,14 @@ void CDHController::send_command_frame_() {
 // Read response frame with timeout
 // ============================================================
 bool CDHController::read_response_frame_(uint8_t *frame, uint32_t timeout_ms) {
+    // DEBUG: dump whatever UART has received
+  uint8_t raw[64];
+  size_t raw_len = 0;
+  while (this->available() && raw_len < 64) {
+    this->read_byte(&raw[raw_len++]);
+  }
+  ESP_LOGW(TAG, "Active RX raw: %d bytes: %s", raw_len,
+    format_hex_pretty(raw, std::min(raw_len, (size_t)48)).c_str());
   uint32_t start = millis();
   uint8_t buf[64];
   int count = 0;
