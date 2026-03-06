@@ -114,6 +114,32 @@ void CDHController::setup() {
   }
 
   ESP_LOGI(TAG, "CDH Controller initialized in PASSIVE mode");
+
+  // Publish initial control values so HA doesn't show "Unknown"
+  if (this->desired_temp_number_ != nullptr)
+    this->desired_temp_number_->publish_state(this->desired_temp_);
+  if (this->min_pump_hz_number_ != nullptr)
+    this->min_pump_hz_number_->publish_state(this->min_pump_freq_raw_ / 10.0f);
+  if (this->max_pump_hz_number_ != nullptr)
+    this->max_pump_hz_number_->publish_state(this->max_pump_freq_raw_ / 10.0f);
+  if (this->min_fan_rpm_number_ != nullptr)
+    this->min_fan_rpm_number_->publish_state(this->min_fan_rpm_);
+  if (this->max_fan_rpm_number_ != nullptr)
+    this->max_fan_rpm_number_->publish_state(this->max_fan_rpm_);
+  if (this->altitude_number_ != nullptr)
+    this->altitude_number_->publish_state(this->altitude_);
+  if (this->supply_voltage_number_ != nullptr)
+    this->supply_voltage_number_->publish_state(this->supply_voltage_raw_ / 10.0f);
+  if (this->glow_plug_power_number_ != nullptr)
+    this->glow_plug_power_number_->publish_state(this->glow_plug_power_);
+  if (this->min_temp_number_ != nullptr)
+    this->min_temp_number_->publish_state(this->min_temp_limit_);
+  if (this->max_temp_number_ != nullptr)
+    this->max_temp_number_->publish_state(this->max_temp_limit_);
+  if (this->set_pump_freq_number_ != nullptr)
+    this->set_pump_freq_number_->publish_state(this->set_pump_freq_raw_ / 10.0f);
+  if (this->operating_mode_select_ != nullptr)
+    this->operating_mode_select_->publish_state("Thermostat");
 }
 
 // ============================================================
@@ -241,36 +267,54 @@ void CDHController::send_command_frame_() {
 // Read response frame with timeout
 // ============================================================
 bool CDHController::read_response_frame_(uint8_t *frame, uint32_t timeout_ms) {
-    // DEBUG: dump whatever UART has received
-  uint8_t raw[64];
-  size_t raw_len = 0;
-  while (this->available() && raw_len < 64) {
-    this->read_byte(&raw[raw_len++]);
-  }
-  ESP_LOGW(TAG, "Active RX raw: %d bytes: %s", raw_len,
-    format_hex_pretty(raw, std::min(raw_len, (size_t)48)).c_str());
   uint32_t start = millis();
-  uint8_t buf[64];
+  uint8_t buf[128];
   int count = 0;
+  bool logged = false;
 
   // Wait for enough bytes to arrive
   while (millis() - start < timeout_ms) {
-    while (this->available() && count < 64) {
+    while (this->available() && count < 128) {
       this->read_byte(&buf[count++]);
-      if (count >= FRAME_SIZE) {
-        // Look for a valid frame in what we've received
-        int pos = find_frame_start_(buf, count);
-        if (pos >= 0 && (count - pos) >= FRAME_SIZE) {
-          memcpy(frame, &buf[pos], FRAME_SIZE);
-          if (validate_frame_(frame)) {
-            ESP_LOGV(TAG, "RX: %s",
-              format_hex_pretty(frame, FRAME_SIZE).c_str());
-            return true;
+    }
+    
+    // DEBUG: log raw bytes once we have some or timeout is near
+    if (!logged && (count > 0 || (millis() - start > timeout_ms / 2))) {
+      ESP_LOGW(TAG, "Active RX raw: %d bytes: %s", count,
+        format_hex_pretty(buf, std::min(count, 48)).c_str());
+      logged = true;
+    }
+
+    if (count >= FRAME_SIZE) {
+      // Look for a valid frame in what we've received
+      int pos = find_frame_start_(buf, count);
+      if (pos >= 0 && (count - pos) >= FRAME_SIZE) {
+        memcpy(frame, &buf[pos], FRAME_SIZE);
+        if (validate_frame_(frame)) {
+          // Skip our own TX echo
+          if (is_tx_frame_(frame)) {
+            ESP_LOGV(TAG, "Skipping TX echo");
+            // Shift buffer past this frame and keep looking
+            int remaining = count - (pos + FRAME_SIZE);
+            if (remaining > 0) {
+              memmove(buf, &buf[pos + FRAME_SIZE], remaining);
+            }
+            count = remaining;
+            continue;
           }
+          ESP_LOGV(TAG, "RX: %s",
+            format_hex_pretty(frame, FRAME_SIZE).c_str());
+          return true;
         }
       }
     }
     delay(1);
+  }
+
+  // Final debug dump if we haven't logged yet
+  if (!logged) {
+    ESP_LOGW(TAG, "Active RX raw: %d bytes: %s", count,
+      format_hex_pretty(buf, std::min(count, 48)).c_str());
   }
 
   // Last chance - check what we have
@@ -279,6 +323,10 @@ bool CDHController::read_response_frame_(uint8_t *frame, uint32_t timeout_ms) {
     if (pos >= 0 && (count - pos) >= FRAME_SIZE) {
       memcpy(frame, &buf[pos], FRAME_SIZE);
       if (validate_frame_(frame)) {
+        if (is_tx_frame_(frame)) {
+          ESP_LOGV(TAG, "Skipping TX echo (late)");
+          return false;
+        }
         ESP_LOGV(TAG, "RX (late): %s",
           format_hex_pretty(frame, FRAME_SIZE).c_str());
         return true;
