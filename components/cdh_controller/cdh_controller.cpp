@@ -235,8 +235,8 @@ void CDHController::build_tx_frame_() {
   this->tx_frame_[15] = this->max_temp_limit_;       // Max temp limit
   this->tx_frame_[16] = this->glow_plug_power_;      // Glow plug power
   this->tx_frame_[17] = this->pump_mode_;             // Pump mode (0=auto)
-  this->tx_frame_[18] = 0x00;                         // Reserved
-  this->tx_frame_[19] = 0x00;                         // Reserved
+  this->tx_frame_[18] = 0xEB;                         // Controller ID high
+  this->tx_frame_[19] = 0x47;                         // Controller ID low
   this->tx_frame_[20] = (this->altitude_ >> 8) & 0xFF;  // Altitude high
   this->tx_frame_[21] = this->altitude_ & 0xFF;         // Altitude low
 
