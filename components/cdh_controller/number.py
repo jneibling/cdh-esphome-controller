@@ -20,6 +20,7 @@ PARAM_SUPPLY_VOLTAGE = 7
 PARAM_GLOW_PLUG_POWER = 8
 PARAM_MIN_TEMP = 9
 PARAM_MAX_TEMP = 10
+PARAM_SET_PUMP_HZ = 11
 
 CONF_DESIRED_TEMP = "desired_temperature"
 CONF_MIN_PUMP_HZ = "min_pump_frequency"
@@ -31,6 +32,7 @@ CONF_SUPPLY_VOLTAGE_SET = "supply_voltage_setting"
 CONF_GLOW_PLUG_POWER = "glow_plug_power"
 CONF_MIN_TEMP_LIMIT = "min_temp_limit"
 CONF_MAX_TEMP_LIMIT = "max_temp_limit"
+CONF_SET_PUMP_HZ = "set_pump_frequency"
 
 def cdh_number_schema(param_type, **kwargs):
     """Create a number schema for a CDH parameter."""
@@ -88,6 +90,11 @@ CONFIG_SCHEMA = cv.Schema(
             icon="mdi:thermometer-high",
             unit_of_measurement=UNIT_CELSIUS,
         ),
+        cv.Optional(CONF_SET_PUMP_HZ): cdh_number_schema(
+            PARAM_SET_PUMP_HZ,
+            icon="mdi:pump",
+            unit_of_measurement=UNIT_HERTZ,
+        ),
     }
 )
 
@@ -103,6 +110,7 @@ NUMBER_PARAMS = {
     CONF_GLOW_PLUG_POWER:   ("set_glow_plug_power_number",  PARAM_GLOW_PLUG_POWER),
     CONF_MIN_TEMP_LIMIT:    ("set_min_temp_number",          PARAM_MIN_TEMP),
     CONF_MAX_TEMP_LIMIT:    ("set_max_temp_number",          PARAM_MAX_TEMP),
+    CONF_SET_PUMP_HZ:       ("set_set_pump_freq_number",     PARAM_SET_PUMP_HZ),
 }
 
 
@@ -135,6 +143,7 @@ def _get_min(key):
         CONF_GLOW_PLUG_POWER: 1,
         CONF_MIN_TEMP_LIMIT: 1,
         CONF_MAX_TEMP_LIMIT: 10,
+        CONF_SET_PUMP_HZ: 0.8,
     }.get(key, 0)
 
 def _get_max(key):
@@ -149,6 +158,7 @@ def _get_max(key):
         CONF_GLOW_PLUG_POWER: 10,
         CONF_MIN_TEMP_LIMIT: 20,
         CONF_MAX_TEMP_LIMIT: 45,
+        CONF_SET_PUMP_HZ: 6.0,
     }.get(key, 100)
 
 def _get_step(key):
@@ -163,4 +173,5 @@ def _get_step(key):
         CONF_GLOW_PLUG_POWER: 1,
         CONF_MIN_TEMP_LIMIT: 1,
         CONF_MAX_TEMP_LIMIT: 1,
+        CONF_SET_PUMP_HZ: 0.1,
     }.get(key, 1)

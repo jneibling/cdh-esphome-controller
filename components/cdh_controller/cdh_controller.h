@@ -69,6 +69,7 @@ static const uint8_t PARAM_SUPPLY_VOLTAGE = 7;
 static const uint8_t PARAM_GLOW_PLUG_POWER = 8;
 static const uint8_t PARAM_MIN_TEMP = 9;
 static const uint8_t PARAM_MAX_TEMP = 10;
+static const uint8_t PARAM_SET_PUMP_HZ = 11;
 
 // ---- Select: Operating Mode ----
 class CDHSelect : public select::Select, public Component {
@@ -123,6 +124,7 @@ class CDHController : public PollingComponent, public uart::UARTDevice {
   void set_glow_plug_power_number(CDHNumber *n) { glow_plug_power_number_ = n; }
   void set_min_temp_number(CDHNumber *n) { min_temp_number_ = n; }
   void set_max_temp_number(CDHNumber *n) { max_temp_number_ = n; }
+  void set_set_pump_freq_number(CDHNumber *n) { set_pump_freq_number_ = n; }
 
   // Select setter
   void set_operating_mode_select(CDHSelect *s) { operating_mode_select_ = s; }
@@ -140,6 +142,7 @@ class CDHController : public PollingComponent, public uart::UARTDevice {
   void set_glow_plug_power(float value);
   void set_min_temp_limit(float value);
   void set_max_temp_limit(float value);
+  void set_set_pump_freq(float value);
   void set_operating_mode(const std::string &mode);
 
   // --- State access ---
@@ -167,6 +170,7 @@ class CDHController : public PollingComponent, public uart::UARTDevice {
   uint8_t desired_temp_{22};
   uint8_t min_pump_freq_raw_{16};    // 1.6 Hz * 10
   uint8_t max_pump_freq_raw_{55};    // 5.5 Hz * 10
+  uint8_t set_pump_freq_raw_{16};    // 1.6 Hz * 10 (used in Fixed Hz mode)
   uint16_t min_fan_rpm_{1680};
   uint16_t max_fan_rpm_{4500};
   uint8_t supply_voltage_raw_{120};  // 12.0V * 10
@@ -220,6 +224,7 @@ class CDHController : public PollingComponent, public uart::UARTDevice {
   CDHNumber *glow_plug_power_number_{nullptr};
   CDHNumber *min_temp_number_{nullptr};
   CDHNumber *max_temp_number_{nullptr};
+  CDHNumber *set_pump_freq_number_{nullptr};
 
   // --- Select pointers ---
   CDHSelect *operating_mode_select_{nullptr};

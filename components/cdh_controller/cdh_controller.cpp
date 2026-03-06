@@ -191,7 +191,11 @@ void CDHController::build_tx_frame_() {
   this->tx_frame_[1] = FRAME_LENGTH;             // Payload length (22)
   this->tx_frame_[2] = this->heater_on_cmd_ ? 0x01 : 0x00;  // On/Off
   this->tx_frame_[3] = 0x00;                      // Reserved (OEM sends 0x00)
-  this->tx_frame_[4] = this->desired_temp_;        // Desired temperature
+  if (this->operating_mode_ == MODE_FIXED_HZ) {
+    this->tx_frame_[4] = this->set_pump_freq_raw_;  // Fixed Hz: pump freq in [4]
+  } else {
+    this->tx_frame_[4] = this->desired_temp_;        // Thermostat: desired temp
+  }
   this->tx_frame_[5] = this->min_pump_freq_raw_;   // Min pump Hz * 10
   this->tx_frame_[6] = this->max_pump_freq_raw_;   // Max pump Hz * 10
   this->tx_frame_[7] = (this->min_fan_rpm_ >> 8) & 0xFF;  // Min fan RPM high
@@ -635,6 +639,14 @@ void CDHController::set_max_temp_limit(float value) {
   }
 }
 
+void CDHController::set_set_pump_freq(float value) {
+  this->set_pump_freq_raw_ = (uint8_t)(value * 10);
+  ESP_LOGI(TAG, "Set pump Hz: %.1f", value);
+  if (this->set_pump_freq_number_ != nullptr) {
+    this->set_pump_freq_number_->publish_state(value);
+  }
+}
+
 void CDHController::set_operating_mode(const std::string &mode) {
   if (mode == "Thermostat") {
     this->operating_mode_ = MODE_THERMOSTAT;
@@ -690,6 +702,7 @@ void CDHNumber::control(float value) {
     case PARAM_GLOW_PLUG_POWER:  this->parent_->set_glow_plug_power(value); break;
     case PARAM_MIN_TEMP:         this->parent_->set_min_temp_limit(value); break;
     case PARAM_MAX_TEMP:         this->parent_->set_max_temp_limit(value); break;
+    case PARAM_SET_PUMP_HZ:      this->parent_->set_set_pump_freq(value); break;
   }
   this->publish_state(value);
 }
