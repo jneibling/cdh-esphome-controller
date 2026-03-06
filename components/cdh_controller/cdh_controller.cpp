@@ -217,10 +217,10 @@ void CDHController::build_tx_frame_() {
   this->tx_frame_[1] = FRAME_LENGTH;             // Payload length (22)
   this->tx_frame_[2] = this->heater_on_cmd_ ? 0x01 : 0x00;  // On/Off
   this->tx_frame_[3] = 0x00;                      // Reserved (OEM sends 0x00)
-  if (this->operating_mode_ == MODE_FIXED_HZ) {
-    this->tx_frame_[4] = this->set_pump_freq_raw_;  // Fixed Hz: pump freq in [4]
+  if (this->heater_on_cmd_) {
+    this->tx_frame_[4] = this->set_pump_freq_raw_;  // Running: pump freq for 0xA5 mode
   } else {
-    this->tx_frame_[4] = this->desired_temp_;        // Thermostat: desired temp
+    this->tx_frame_[4] = this->desired_temp_;        // Off: desired temp for 0xCD mode
   }
   this->tx_frame_[5] = this->min_pump_freq_raw_;   // Min pump Hz * 10
   this->tx_frame_[6] = this->max_pump_freq_raw_;   // Max pump Hz * 10
@@ -230,7 +230,8 @@ void CDHController::build_tx_frame_() {
   this->tx_frame_[10] = this->max_fan_rpm_ & 0xFF;        // Max fan RPM low
   this->tx_frame_[11] = this->supply_voltage_raw_;  // Voltage * 10
   this->tx_frame_[12] = this->fan_sensor_pulses_;   // Fan sensor pulses
-  this->tx_frame_[13] = this->operating_mode_;       // Mode (0xCD/0xA5)
+  // OEM uses 0xA5 (Fixed Hz) to run, 0xCD (Thermostat) when off
+  this->tx_frame_[13] = this->heater_on_cmd_ ? MODE_FIXED_HZ : MODE_THERMOSTAT;
   this->tx_frame_[14] = this->min_temp_limit_;       // Min temp limit
   this->tx_frame_[15] = this->max_temp_limit_;       // Max temp limit
   this->tx_frame_[16] = this->glow_plug_power_;      // Glow plug power
